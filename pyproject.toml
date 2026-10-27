@@ -1,0 +1,17 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "flweatherops"
+version = "1.0.0"
+description = "Drone + marine weather briefings for South/Central Florida (Open-Meteo + NOAA tides)"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = ["requests>=2.28", "rich>=13.0"]
+
+[project.scripts]
+flweatherops = "flweatherops.cli:main"
+
+[tool.setuptools]
+packages = ["flweatherops"]

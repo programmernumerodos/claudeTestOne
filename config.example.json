@@ -1,0 +1,30 @@
+{
+  "locations": {
+    "stuart": {
+      "name": "Stuart / St. Lucie Inlet, FL",
+      "lat": 27.1975,
+      "lon": -80.2528,
+      "marine_lat": 27.165,
+      "marine_lon": -80.14,
+      "coastal": true,
+      "default": true
+    },
+    "vero-beach": {
+      "default": true
+    }
+  },
+  "thresholds": {
+    "drone": {
+      "wind_gust_mph": {
+        "caution": 15,
+        "nogo": 22
+      }
+    },
+    "marine": {
+      "wave_height_ft": {
+        "caution": 2,
+        "nogo": 4
+      }
+    }
+  }
+}
