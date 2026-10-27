@@ -1,2 +1,7 @@
+# CLI
 requests>=2.28
 rich>=13.0
+# Dashboard (streamlit run dashboard.py)
+streamlit>=1.50
+plotly>=5.20
+pandas>=2.0

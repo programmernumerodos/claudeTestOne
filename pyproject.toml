@@ -4,11 +4,15 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "flweatherops"
-version = "1.0.0"
-description = "Drone + marine weather briefings for South/Central Florida (Open-Meteo + NOAA tides)"
+version = "2.0.0"
+description = "Drone + marine weather briefings for South/Central Florida: CLI + Streamlit dashboard, safe windows, NHC tropical awareness"
 readme = "README.md"
 requires-python = ">=3.10"
 dependencies = ["requests>=2.28", "rich>=13.0"]
+
+[project.optional-dependencies]
+dashboard = ["streamlit>=1.50", "plotly>=5.20", "pandas>=2.0"]
+dev = ["pytest>=7"]
 
 [project.scripts]
 flweatherops = "flweatherops.cli:main"

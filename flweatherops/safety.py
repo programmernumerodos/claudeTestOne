@@ -148,6 +148,14 @@ def lightning_reason(h: HourData, cfg: dict[str, Any]) -> Reason | None:
     return None
 
 
+def with_extra(v: Verdict, extra: list[Reason]) -> Verdict:
+    """Return a copy of ``v`` with additional reasons (e.g. tropical) folded in."""
+    if not extra:
+        return v
+    reasons = sorted([*v.reasons, *extra], key=lambda r: r.level, reverse=True)
+    return Verdict(max(r.level for r in reasons), reasons)
+
+
 def evaluate(h: HourData, activity: str, thresholds: dict[str, Any]) -> Verdict:
     """Evaluate one hour for ``activity`` ('drone' or 'marine')."""
     limits = thresholds.get(activity, {})
@@ -189,17 +197,10 @@ def summarize(
     now = current or verdicts[0]
     counts = Counter(v.status for v in verdicts)
 
-    best: tuple[int, int] | None = None
-    start: int | None = None
-    for i, (h, v) in enumerate(zip(hours, verdicts)):
-        ok = v.status == Status.SAFE and (h.is_day or not daylight_only)
-        if ok and start is None:
-            start = i
-        if start is not None and (not ok or i == len(hours) - 1):
-            end = i if ok else i - 1
-            if best is None or end - start > best[1] - best[0]:
-                best = (start, end)
-            start = None
+    from flweatherops.windows import find_windows  # local: windows imports safety
+
+    runs = find_windows(hours, verdicts, daylight_only=daylight_only)
+    longest = max(runs, key=lambda w: w.duration_h, default=None)
 
     change = None
     for h, v in zip(hours[1:], verdicts[1:]):
@@ -214,7 +215,7 @@ def summarize(
         now=now,
         worst=max((v.status for v in verdicts), default=Status.SAFE),
         counts={s: counts.get(s, 0) for s in Status},
-        best_window=(hours[best[0]], hours[best[1]]) if best else None,
+        best_window=(longest.hours[0], longest.hours[-1]) if longest else None,
         change=change,
         top_factors=[name for name, _ in factor_counts.most_common(3)],
     )

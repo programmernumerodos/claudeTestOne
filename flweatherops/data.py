@@ -46,6 +46,9 @@ HOURLY_VARS = [
     "weather_code",
     "cloud_cover",
     "cloud_cover_low",
+    "cloud_cover_mid",
+    "cloud_cover_high",
+    "dew_point_2m",
     "visibility",
     "wind_speed_10m",
     "wind_direction_10m",
@@ -68,6 +71,8 @@ CURRENT_VARS = [
     "wind_direction_10m",
     "wind_gusts_10m",
 ]
+DAILY_VARS = ["sunrise", "sunset"]
+FORECAST_DAYS = 4  # enough for a 72 h scan starting late in the day
 MARINE_VARS = [
     "wave_height",
     "wave_direction",
@@ -105,6 +110,9 @@ class HourData:
     weather_code: int | None = None
     cloud_cover_pct: float | None = None
     cloud_low_pct: float | None = None
+    cloud_mid_pct: float | None = None
+    cloud_high_pct: float | None = None
+    dew_point_f: float | None = None
     visibility_mi: float | None = None
     wind_mph: float | None = None
     wind_dir: float | None = None
@@ -160,6 +168,16 @@ class LocationData:
     tides: list[TideEvent] = dataclasses.field(default_factory=list)
     notes: list[str] = dataclasses.field(default_factory=list)
     generated: datetime = dataclasses.field(default_factory=datetime.now)  # tz-aware when set
+    sun: list[tuple[datetime, datetime]] = dataclasses.field(default_factory=list)
+
+    def next_tide(self, after: datetime) -> TideEvent | None:
+        """First tide event at or after ``after``."""
+        return next((e for e in self.tides if e.time >= after), None)
+
+    def prev_tide(self, before: datetime) -> TideEvent | None:
+        """Last tide event before ``before``."""
+        prior = [e for e in self.tides if e.time < before]
+        return prior[-1] if prior else None
 
 
 # --------------------------------------------------------------------------- #
@@ -277,6 +295,35 @@ def get_json(
         raise FetchError(_short_error(exc)) from exc
 
 
+def get_text(
+    url: str,
+    params: dict[str, Any] | None = None,
+    *,
+    use_cache: bool = True,
+    max_cache_age: timedelta = timedelta(hours=6),
+) -> tuple[str, timedelta | None]:
+    """GET a text/HTML resource with the same cache fallback as :func:`get_json`.
+
+    Returns (text, cached_age) where cached_age is set when served from cache.
+    """
+    params = params or {}
+    path = _cache_path(url, params)
+    try:
+        resp = session().get(url, params=params, timeout=TIMEOUT_S)
+        if resp.status_code != 200:
+            raise FetchError(f"{resp.status_code} {resp.reason or 'HTTP error'}")
+        text = resp.text
+        if use_cache:
+            _write_cache(path, {"text": text})
+        return text, None
+    except (requests.RequestException, FetchError) as exc:
+        if use_cache:
+            hit = _read_cache(path)
+            if hit and isinstance(hit[0].get("text"), str) and hit[1] <= max_cache_age:
+                return hit[0]["text"], hit[1]
+        raise FetchError(_short_error(exc)) from exc
+
+
 def _api_error_reason(data: Any) -> str | None:
     """Extract an error message from Open-Meteo or NOAA error payloads."""
     if not isinstance(data, dict):
@@ -353,18 +400,22 @@ def _m_to_ft(v: Any) -> float | None:
 
 def fetch_forecast(
     loc: Location, tz: str, *, use_cache: bool, max_age: timedelta
-) -> tuple[list[HourData], dict[str, Any], timedelta | None]:
-    """Fetch hourly + current weather. Returns (hours, current_block, cache_age)."""
+) -> tuple[list[HourData], dict[str, Any], list[tuple[datetime, datetime]], timedelta | None]:
+    """Fetch hourly + current weather.
+
+    Returns (hours, current_block, [(sunrise, sunset), ...], cache_age).
+    """
     params = {
         "latitude": round(loc.lat, 4),
         "longitude": round(loc.lon, 4),
         "hourly": ",".join(HOURLY_VARS),
         "current": ",".join(CURRENT_VARS),
+        "daily": ",".join(DAILY_VARS),
         "temperature_unit": "fahrenheit",
         "wind_speed_unit": "mph",
         "precipitation_unit": "inch",
         "timezone": tz,
-        "forecast_days": 3,
+        "forecast_days": FORECAST_DAYS,
     }
     res = get_json(FORECAST_URL, params, use_cache=use_cache, max_cache_age=max_age)
     hourly = res.data.get("hourly")
@@ -387,6 +438,9 @@ def fetch_forecast(
                 weather_code=None if code is None else int(code),
                 cloud_cover_pct=_num(s["cloud_cover"][i]),
                 cloud_low_pct=_num(s["cloud_cover_low"][i]),
+                cloud_mid_pct=_num(s["cloud_cover_mid"][i]),
+                cloud_high_pct=_num(s["cloud_cover_high"][i]),
+                dew_point_f=_num(s["dew_point_2m"][i]),
                 visibility_mi=_m_to_mi(s["visibility"][i]),
                 wind_mph=_num(s["wind_speed_10m"][i]),
                 wind_dir=_num(s["wind_direction_10m"][i]),
@@ -400,7 +454,21 @@ def fetch_forecast(
             )
         )
     current = res.data.get("current")
-    return hours, current if isinstance(current, dict) else {}, res.cached_age
+    return hours, current if isinstance(current, dict) else {}, _parse_sun(res.data), res.cached_age
+
+
+def _parse_sun(payload: dict[str, Any]) -> list[tuple[datetime, datetime]]:
+    """(sunrise, sunset) pairs from the optional daily block."""
+    daily = payload.get("daily")
+    if not isinstance(daily, dict):
+        return []
+    out = []
+    for rise, sset in zip(daily.get("sunrise") or [], daily.get("sunset") or []):
+        try:
+            out.append((datetime.fromisoformat(rise), datetime.fromisoformat(sset)))
+        except (TypeError, ValueError):
+            continue
+    return out
 
 
 def merge_marine(
@@ -422,7 +490,7 @@ def merge_marine(
         "longitude": round(lon, 4),
         "hourly": ",".join(MARINE_VARS),
         "timezone": tz,
-        "forecast_days": 3,
+        "forecast_days": FORECAST_DAYS,
     }
     res = get_json(MARINE_URL, params, use_cache=use_cache, max_cache_age=max_age)
     hourly = res.data.get("hourly")
@@ -448,7 +516,8 @@ def merge_marine(
     return found, res.cached_age
 
 
-def _haversine_mi(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
+def haversine_mi(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
+    """Great-circle distance in statute miles."""
     r = 3958.8
     p1, p2 = math.radians(lat1), math.radians(lat2)
     dp, dl = p2 - p1, math.radians(lon2 - lon1)
@@ -472,7 +541,7 @@ def nearest_tide_station(
         slat, slon = _num(st.get("lat")), _num(st.get("lng"))
         if slat is None or slon is None or not st.get("id"):
             continue
-        d = _haversine_mi(lat, lon, slat, slon)
+        d = haversine_mi(lat, lon, slat, slon)
         if d <= max_mi and (best is None or d < (best.distance_mi or 1e9)):
             best = TideStation(str(st["id"]), str(st.get("name", st["id"])), d)
     return best
@@ -590,7 +659,7 @@ def load_location(
     use_cache = use_cache and bool(cfg.get("cache", {}).get("enabled", True))
     notes: list[str] = []
 
-    all_hours, cur_block, age = fetch_forecast(
+    all_hours, cur_block, sun, age = fetch_forecast(
         loc, tz, use_cache=use_cache, max_age=max_age
     )
     if age is not None:
@@ -630,8 +699,12 @@ def load_location(
                     use_cache=use_cache,
                 )
             if station:
+                # Start 12 h back so the current tide stage (rising/falling) is known.
                 tides, tage = fetch_tides(
-                    station, window[0].time, len(window) + 1, use_cache=use_cache
+                    station,
+                    window[0].time - timedelta(hours=12),
+                    len(window) + 13,
+                    use_cache=use_cache,
                 )
                 if tage is not None:
                     notes.append(_age_note("Tides", tage))
@@ -648,4 +721,5 @@ def load_location(
         tides=tides,
         notes=notes,
         generated=generated,
+        sun=sun,
     )

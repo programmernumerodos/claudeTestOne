@@ -8,6 +8,7 @@ All thresholds are stored in *internal* units regardless of display preference:
 * precipitation: inches per hour
 * temperature / heat index: °F
 * CAPE: J/kg
+* distances: statute miles
 
 Each numeric rule has a ``caution`` and a ``nogo`` level. For "max" rules
 (wind, gusts, waves, precip...) a value **at or above** the level triggers it.
@@ -26,6 +27,27 @@ from typing import Any
 DEFAULT_CONFIG: dict[str, Any] = {
     "timezone": "America/New_York",
     "locations": {
+        "boynton-beach": {
+            "name": "Boynton Beach, FL",
+            "lat": 26.5453,
+            "lon": -80.0436,
+            "marine_lat": 26.545,
+            "marine_lon": -80.02,
+            "coastal": True,
+            # Direction from the beach toward open water (east coast = 90°).
+            "shore_facing_deg": 90,
+            "default": True,
+        },
+        "palm-beach": {
+            "name": "Palm Beach / Lake Worth Inlet, FL",
+            "lat": 26.7720,
+            "lon": -80.0370,
+            "marine_lat": 26.77,
+            "marine_lon": -80.01,
+            "coastal": True,
+            "shore_facing_deg": 90,
+            "default": False,
+        },
         "vero-beach": {
             "name": "Vero Beach, FL",
             "lat": 27.6386,
@@ -34,6 +56,7 @@ DEFAULT_CONFIG: dict[str, Any] = {
             "marine_lat": 27.64,
             "marine_lon": -80.34,
             "coastal": True,
+            "shore_facing_deg": 80,
             "default": True,
         },
         "sebastian-inlet": {
@@ -43,6 +66,7 @@ DEFAULT_CONFIG: dict[str, Any] = {
             "marine_lat": 27.86,
             "marine_lon": -80.40,
             "coastal": True,
+            "shore_facing_deg": 70,
             "default": False,
         },
         "fort-pierce": {
@@ -52,6 +76,7 @@ DEFAULT_CONFIG: dict[str, Any] = {
             "marine_lat": 27.47,
             "marine_lon": -80.26,
             "coastal": True,
+            "shore_facing_deg": 75,
             "default": False,
         },
         "okeechobee": {
@@ -91,6 +116,40 @@ DEFAULT_CONFIG: dict[str, Any] = {
             "precip_prob_min": 30,
         },
     },
+    # Practical-advice tuning (does not change Safe/Caution/No-Go).
+    "advice": {
+        # LiPo packs are happiest around 68-86 °F; outside this range we add notes.
+        "lipo_cool_f": 60,
+        "lipo_hot_f": 95,
+        # Gust spread (gust - sustained) that suggests turbulence.
+        "gust_spread_mph": 10,
+        # Sub-250 g drones are rated for roughly this much wind (DJI Mini "Level 5").
+        "light_drone_max_wind_mph": 22,
+    },
+    # Safe Window Finder.
+    "windows": {
+        "min_hours": 2,
+        "scan_hours": 72,
+        "drone_daylight_only": True,
+    },
+    # NHC tropical-cyclone awareness. Each hour is checked against the storm's
+    # (interpolated) forecast position.
+    "tropical": {
+        "enabled": True,
+        "caution_radius_mi": 400,
+        "nogo_radius_mi": 200,
+        # Storms beyond this are listed but ignored for the safety assessment.
+        "list_radius_mi": 1500,
+        "lookahead_hours": 120,
+        # A hurricane/TS *warning* naming your area -> No-Go; a *watch* -> Caution.
+        "warning_status": "nogo",
+        "watch_status": "caution",
+    },
+    "history": {
+        "enabled": True,
+        # Don't log the same location more often than this (dashboard reruns).
+        "min_interval_min": 30,
+    },
     "cache": {
         "enabled": True,
         # Cached data is only used as a fallback when the live request fails.
@@ -116,6 +175,7 @@ class Location:
     marine_lat: float | None = None
     marine_lon: float | None = None
     tide_station: str | None = None
+    shore_facing_deg: float | None = None
     default: bool = False
 
     @property
@@ -138,6 +198,7 @@ class Location:
             marine_lat=_opt_float(data.get("marine_lat")),
             marine_lon=_opt_float(data.get("marine_lon")),
             tide_station=data.get("tide_station"),
+            shore_facing_deg=_opt_float(data.get("shore_facing_deg")),
             default=bool(data.get("default", False)),
         )
 

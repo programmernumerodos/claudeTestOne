@@ -7,10 +7,11 @@
       "marine_lat": 27.165,
       "marine_lon": -80.14,
       "coastal": true,
+      "shore_facing_deg": 75,
       "default": true
     },
     "vero-beach": {
-      "default": true
+      "default": false
     }
   },
   "thresholds": {
@@ -26,5 +27,15 @@
         "nogo": 4
       }
     }
+  },
+  "windows": {
+    "min_hours": 3
+  },
+  "tropical": {
+    "caution_radius_mi": 500,
+    "nogo_radius_mi": 250
+  },
+  "advice": {
+    "light_drone_max_wind_mph": 27
   }
 }
